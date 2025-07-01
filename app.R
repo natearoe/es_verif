@@ -1,3 +1,5 @@
+
+# library -----------------------------------------------------------------
 library(shiny)
 library(xml2)
 library(rvest)
@@ -7,6 +9,12 @@ library(soilDB)
 library(shinyWidgets)
 library(leaflet)
 library(sf)
+library(shinyjs)
+library(DT)
+
+
+# ui ----------------------------------------------------------------------
+
 
 ui <- fluidPage(
   titlePanel("ES Verification QC"),
@@ -14,6 +22,12 @@ ui <- fluidPage(
     sidebarPanel(
       textInput(inputId = "esid", label = "Ecological Site ID:"),
       tags$div(style = "margin-top: 12px;"),
+      actionButton("fetch_button", "Fetch Data"),
+      tags$div(style = "margin-top: 12px;"),
+
+      ## pickerInput -------------------------------------------------------------
+
+
       shinyWidgets::pickerInput(inputId = "site_choices",
                                 label = "Site",
                                 choices = c("User Site ID", "Veg Plot Size",
@@ -114,20 +128,24 @@ ui <- fluidPage(
                                              "Pedon Tax. Hist. Text Author",
                                              "Pedon Tax. Hist. Text Entry")),
       dateRangeInput(inputId = "daterange", label = "Site Observation from:"),
-      actionButton("run_button", "Run")
+      actionButton("filter_button", "Filter and Map Data")
     ),
 
+    # mainPanel ---------------------------------------------------------------
+
+
     mainPanel(
+      verbatimTextOutput("fetch_msg"),
+      verbatimTextOutput("missing_coords_msg"),
       tabsetPanel(
         tabPanel("Map",
-                 verbatimTextOutput("debug_msg"),
-                 verbatimTextOutput("spat_error"),
-                 leafletOutput("es_map", height = 700)
+                 verbatimTextOutput("map_msg"),
+                 leafletOutput("map_data", height = 700)
         ),
         tabPanel("Tabular",
-                 verbatimTextOutput("debug_msg"),
-                 verbatimTextOutput("spat_error"),
-                 tableOutput("es_data")
+                 verbatimTextOutput("map_msg"),
+                 tags$div(style = "margin-top: 12px;"),
+                 DT::dataTableOutput("tabular_disp")
         )
       )
     )
@@ -135,12 +153,17 @@ ui <- fluidPage(
 )
 
 
+# server ------------------------------------------------------------------
 server <- function(input, output, session) {
 
-  es_out <- eventReactive(input$run_button, {
+
+  # fetchReact --------------------------------------------------------------
+
+  fetch_out <- eventReactive(input$fetch_button, {
     # require esid
     req(input$esid)
 
+    ## Web report
     # access through web report url
     url <- paste0("https://nasis.sc.egov.usda.gov/NasisReportsWebSite/limsreport.aspx?report_name=DSP-ESverifSiteDataByEcosite&es1=", input$esid)
 
@@ -149,32 +172,98 @@ server <- function(input, output, session) {
       read_html(url)
     }, error = function(e) {
       return(list(
-        data_table = NULL,
-        missing_spat = NULL,
-        debug_msg = paste("NASIS web report service appears to be down:", e$message),
-        data_spat = NULL
+        tabular_data = NULL,
+        geom_data = NULL,
+        fetch_msg = paste("NASIS web report service appears to be down:", e$message)
       ))
     })
 
-    if (inherits(page, "list")) return(page)  # return early on read_html failure
+    # return early on read_html failure
+    if (inherits(page, "list")) return(page)
 
     # Try to parse the table
     web_data <- tryCatch({
       html_node(page, "table") |> html_table(header = TRUE)
     }, error = function(e) {
       return(list(
-        data_table = NULL,
-        missing_spat = NULL,
-        debug_msg = "No sites associated with this Ecological Site ID.",
-        data_spat = NULL
+        tabular_table = NULL,
+        geom_data = NULL,
+        fetch_msg = "No sites associated with this Ecological Site ID."
       ))
     })
 
-    # return if list
+    # return early on html_node error
     if (inherits(web_data, "list")) return(web_data)
 
+    # access mapunits
+    mu_data <- soilDB::fetchSDA_spatial(x = input$esid,
+                                        by.col = "ecoclassid",
+                                        method = "bbox")
+
+    # check for SDA error
+    if(inherits(mu_data, "try-error"))
+      return(
+        list(
+          tabular_data = web_data,
+          geom_data = NULL,
+          fetch_msg = "Unable to access mapunit geometry - Soil Data Access appears to be down."
+        ))
+    # check for no mapunit data
+    if(inherits(mu_data, "NULL"))
+      return(
+        list(
+          tabular_data = web_data,
+          geom_data = NULL,
+          fetch_msg = "No mapunit geometry returned. Is the ecological site in SSURGO?"
+        ))
+    # return tabular and spatial data
+    if(inherits(mu_data, "data.frame")) {
+      mu_data <- mu_data |>
+        sf::st_as_sf(coords = c("longstddecimaldegrees",
+                                "latstddecimaldegrees"),
+                     crs = 4326)
+
+      return(
+        list(
+          tabular_data = web_data,
+          geom_data = mu_data,
+          fetch_msg = paste("Data successfully retrieved for Ecological Site ID:", input$esid)
+        ))
+    }
+
+  })
+
+
+  # filterReact -------------------------------------------------------------
+
+  filter_out <- eventReactive(input$filter_button, {
+
+    tabular_data <- fetch_out()$tabular_data
+    mu_data <- fetch_out()$geom_data
+
+    if(inherits(tabular_data, "NULL")) {
+      return(
+        list(
+          map_data = NULL,
+          map_msg = "Map not generated when site data is missing.",
+          missing_coords_msg = NULL
+        )
+      )
+
+    }
+
+    if(inherits(fetch_out()$geom_data, "NULL")) {
+      return(
+        list(
+          map_data = NULL,
+          map_msg = "Map not generated when mapunit data is missing.",
+          missing_coords_msg = NULL
+        )
+      )
+    }
+
     # check for missing coordinates
-    missing_data <- web_data |> dplyr::filter(is.na(longstddecimaldegrees) | is.na(latstddecimaldegrees))
+    missing_data <- tabular_data |> dplyr::filter(is.na(longstddecimaldegrees) | is.na(latstddecimaldegrees))
 
     missing_message <- if (nrow(missing_data) > 0) {
       paste("The following sites are missing WGS84 coordinates and were removed:",
@@ -182,14 +271,6 @@ server <- function(input, output, session) {
     } else {
       NULL
     }
-
-    # access mapunits
-    mu_data <- soilDB::fetchSDA_spatial(x = input$esid,
-                                        by.col = "ecoclassid",
-                                        method = "bbox") |>
-      sf::st_as_sf(coords = c("longstddecimaldegrees",
-                              "latstddecimaldegrees"),
-                   crs = 4326)
 
     # check for missing values
     selected_fields <- c(input$site_choices,
@@ -267,21 +348,21 @@ server <- function(input, output, session) {
 
       if(length(cols) == 1){
         # 1:1 mapping - single required column must have some data
-        !is.na(web_data[[cols]])
+        !is.na(tabular_data[[cols]])
       } else {
         # multi-column mapping - only one column needs to be populated
-        rowSums(!is.na(web_data[, cols, drop = FALSE])) > 0
+        rowSums(!is.na(tabular_data[, cols, drop = FALSE])) > 0
       }
 
     }) |> as.matrix()
 
     # store completeness in column
-    web_data$is_complete <- apply(completeness_matrix, 1, all)
+    tabular_data$is_complete <- apply(completeness_matrix, 1, all)
 
     ## assess data range
 
     # Extract the most recent date per string
-    web_data$most_recent_date <- lapply(web_data$obsdate, function(x) {
+    tabular_data$most_recent_date <- lapply(tabular_data$obsdate, function(x) {
       # Split on commas
       parts <- strsplit(x, ",\\s*")[[1]]
 
@@ -292,9 +373,24 @@ server <- function(input, output, session) {
       max(dates, na.rm = TRUE)
     }) |> unlist()
 
-    web_data <- web_data  |>
+    web_data <- tabular_data  |>
       dplyr::filter(most_recent_date >= input$daterange[1],
                     most_recent_date <= input$daterange[2])
+
+    # Replace NA with empty strings just for visual
+    tab_display <- tabular_data |>
+      dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
+
+    tab_display[is.na(tab_display)] <- ""
+
+    # Create DT table
+    df_disp <- DT::datatable(tab_display, options = list(scrollX = TRUE)) |>
+      # Highlight required fields if they were NA (now empty string)
+      DT::formatStyle(
+        columns = required_columns,
+        valueColumns = required_columns,
+        backgroundColor = styleEqual("", 'mistyrose')
+      )
 
     # set color palette
     pal <- colorFactor(
@@ -302,10 +398,8 @@ server <- function(input, output, session) {
       domain = c(FALSE, TRUE)
     )
 
-    #
+    ## createMap ---------------------------------------------------------------
 
-
-    # create map
     my_map  <- web_data |> dplyr::filter(!is.na(longstddecimaldegrees) & !is.na(latstddecimaldegrees)) |>
       sf::st_as_sf(coords = c("longstddecimaldegrees",
                               "latstddecimaldegrees"),
@@ -340,33 +434,43 @@ server <- function(input, output, session) {
     # my_map <- my_map@map
 
     list(
-      data_table = web_data,
-      missing_spat = missing_message,
-      debug_msg = paste("Data successfully retrieved for Ecological Site ID:", input$esid),
-      data_spat = my_map
+      map_data = my_map,
+      map_msg = NULL,
+      missing_coords_msg = missing_message,
+      tabular_disp = df_disp
     )
 
   })
 
-  output$debug_msg <- renderText({
-    req(es_out())
-    es_out()$debug_msg
+
+  # output ------------------------------------------------------------------
+
+
+  output$fetch_msg <- renderText({
+    req(fetch_out())
+    fetch_out()$fetch_msg
   })
 
-  output$es_data <- renderTable({
-    req(es_out())
-    es_out()$data_table
+  output$map_msg <- renderText({
+    req(filter_out())
+    filter_out()$map_msg
   })
 
-  output$spat_error <- renderText({
-    req(es_out())
-    es_out()$missing_spat
+  output$tabular_disp <- DT::renderDataTable({
+    req(fetch_out())
+    filter_out()$tabular_disp
   })
 
-  output$es_map <- renderLeaflet({
-    req(es_out())
-    es_out()$data_spat
+  output$missing_coords_msg <- renderText({
+    req(filter_out())
+    filter_out()$missing_coords_msg
   })
+
+  output$map_data <- renderLeaflet({
+    req(filter_out())
+    filter_out()$map_data
+  })
+
 }
 
 shinyApp(ui, server)
