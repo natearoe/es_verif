@@ -1,0 +1,12 @@
+name: es_verif
+title: es_verif
+username: nroe
+account: nroe
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 15002761
+bundleId: 10713904
+url: https://nroe.shinyapps.io/es_verif/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
