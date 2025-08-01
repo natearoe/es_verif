@@ -1,6 +1,5 @@
 
 # library -----------------------------------------------------------------
-library(shiny)
 library(xml2)
 library(rvest)
 library(dplyr)
@@ -14,7 +13,7 @@ library(DT)
 library(httr)
 library(jsonlite)
 library(stringr)
-
+library(shiny)
 
 # ui ----------------------------------------------------------------------
 
@@ -23,10 +22,15 @@ ui <- fluidPage(
   titlePanel("ES Verification QC"),
   sidebarLayout(
     sidebarPanel(
+      helpText("Instructions:"),
+      helpText("1. Enter an Ecological Site ID."),
+      helpText("2. Click 'Fetch Data' to load data."),
+      helpText("3. Wait for data to load."),
+      helpText("4. Choose filtering criteria, then click 'Filter and Map Data'."),
+      helpText("5. Adjust filtering criteria as desired then click 'Filter and Map'."),
+      helpText("6. Only 'Fetch Data' again if loading new site or app times out."),
       textInput(inputId = "esid", label = "Ecological Site ID:"),
-      # tags$div(style = "margin-top: 12px;"),
       actionButton("fetch_button", "Fetch Data"),
-      # tags$div(style = "margin-top: 12px;"),
 
       ## pickerInput -------------------------------------------------------------
 
@@ -191,38 +195,33 @@ ui <- fluidPage(
                  verbatimTextOutput("ecosite_data"),
                  verbatimTextOutput("stm_not_site"),
                  verbatimTextOutput("site_not_stm")
-                 # # tags$div(style = "margin-top: 12px;"),
                  # DT::dataTableOutput("tabular_disp")
         ),
         tabPanel("Site",
+                 downloadButton("download_site_data", "Download Site Data (.csv)"),
                  # verbatimTextOutput("map_msg"),
-                 # tags$div(style = "margin-top: 12px;"),
                  DT::dataTableOutput("site_data")
         ),
 
         tabPanel("Veg Plot",
                  DT::dataTableOutput("vp_data")
                  # verbatimTextOutput("map_msg"),
-                 # # tags$div(style = "margin-top: 12px;"),
                  # DT::dataTableOutput("tabular_disp")
         ),
         tabPanel("Plot Plant Inv.",
                  verbatimTextOutput("ppi_msg"),
                  DT::dataTableOutput("ppi_data")
                  # verbatimTextOutput("map_msg"),
-                 # # tags$div(style = "margin-top: 12px;"),
                  # DT::dataTableOutput("tabular_disp")
         ),
         tabPanel("Veg Transect",
                  DT::dataTableOutput("veg_trans_data")
                  # verbatimTextOutput("map_msg"),
-                 # # tags$div(style = "margin-top: 12px;"),
                  # DT::dataTableOutput("tabular_disp")
         ),
         tabPanel("Veg Transect Summary",
                  DT::dataTableOutput("veg_trans_sum_data")
                  # verbatimTextOutput("map_msg"),
-                 # # tags$div(style = "margin-top: 12px;"),
                  # DT::dataTableOutput("tabular_disp")
         ),
       )
@@ -238,6 +237,9 @@ server <- function(input, output, session) {
   # fetchReact --------------------------------------------------------------
 
   fetch_out <- eventReactive(input$fetch_button, {
+
+    withProgress(message = "Fetching data...", value = 0, min = 0, max = 1, {
+
 
     # require esid
     req(input$esid)
@@ -268,6 +270,8 @@ server <- function(input, output, session) {
 
 
     # Ecosite data ------------------------------------------------------------
+
+    incProgress(1/7, detail = "Fetching ecosite data...")
 
     # ecosite data includes the number of comps web report, accessing states/phases
     # from EDIT, and accessing states/phases from site data
@@ -340,6 +344,7 @@ server <- function(input, output, session) {
 
     # Site data ---------------------------------------------------------------
 
+    incProgress(1/7, detail = "Fetching site data...")
     # site data all comes from one web report
 
     ## Web report: site data ---------------------------------------------------
@@ -380,6 +385,7 @@ server <- function(input, output, session) {
 
     # Geom data ---------------------------------------------------------------
 
+    incProgress(1/7, detail = "Fetching map unit geometry...")
     # geom data comes from one SDA query
 
     ## SDA query ---------------------------------------------------------------
@@ -413,7 +419,7 @@ server <- function(input, output, session) {
 
     # Veg Plot ----------------------------------------------------------------
 
-
+    incProgress(1/7, detail = "Fetching vegetation plot data")
     ## Web report: veg plot ----------------------------------------------------
 
     url <- paste0("https://nasis.sc.egov.usda.gov/NasisReportsWebSite/limsreport.aspx?report_name=DSP-ESverifVegPlot&es1=", input$esid)
@@ -451,6 +457,7 @@ server <- function(input, output, session) {
 
     # Plot Plant Inventory -----------------------------------------------------------
 
+    incProgress(1/7, detail = "Fetching plot plant inventory data...")
     ## Web report: plot plant inventory ----------------------------------------
 
 
@@ -490,6 +497,7 @@ server <- function(input, output, session) {
 
     # Veg trans ---------------------------------------------------------------
 
+    incProgress(1/7, detail = "Fetching vegetation transect data...")
     ## Web report: veg trans ---------------------------------------------------
 
     url <- paste0("https://nasis.sc.egov.usda.gov/NasisReportsWebSite/limsreport.aspx?report_name=DSP-ESverifVegTrans&es1=", input$esid)
@@ -528,6 +536,7 @@ server <- function(input, output, session) {
 
     # Veg Trans Summary -------------------------------------------------------
 
+    incProgress(1/7, detail = "Fetching transect summary data...")
     # Web report: veg trans sum -----------------------------------------------
 
     url <- paste0("https://nasis.sc.egov.usda.gov/NasisReportsWebSite/limsreport.aspx?report_name=DSP-ESverifVegTransSummary&es1=", input$esid)
@@ -601,6 +610,8 @@ server <- function(input, output, session) {
 
 
     return(fetch_results)
+
+  })
 
   })
 
@@ -842,7 +853,13 @@ server <- function(input, output, session) {
     tab_display[is.na(tab_display)] <- ""
 
     # Create DT table
-    df_disp <- DT::datatable(tab_display, options = list(scrollX = TRUE)) |>
+    df_disp <- DT::datatable(tab_display, options = list(
+      pageLength = 10,
+      lengthMenu = list(c(1, 5, 10, 25, 50, 100),
+                        c("1", "5", "10", "25", "50", "100")),
+      scrollX = TRUE,
+      fixedHeader = TRUE,
+      scrollY = "500px")) |>
       # Highlight required fields if they were NA (now empty string)
       DT::formatStyle(
         columns = required_columns,
@@ -1079,14 +1096,25 @@ server <- function(input, output, session) {
 
   ## Site --------------------------------------------------------------------
 
-
-
-
-
   output$site_data <- DT::renderDataTable({
-    req(fetch_out())
+    req(filter_out())
     filter_out()$site_data
+
   })
+
+  output$download_site_data <- downloadHandler(
+    filename = function() {
+      paste0(input$esid, "_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      write.csv(fetch_out()$site_data, file, row.names = FALSE)
+    }
+  )
+
+
+# PPI ---------------------------------------------------------------------
+
+
 
   output$ppi_data <- DT::renderDataTable({
     req(filter_out())
