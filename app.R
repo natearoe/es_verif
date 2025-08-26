@@ -232,6 +232,7 @@ ui <- fluidPage(
       verbatimTextOutput("missing_coords_msg"),
       tabsetPanel(
         tabPanel("Ecosite",
+                 verbatimTextOutput("ecosite_msg"),
                  verbatimTextOutput("ecosite_comp_msg"),
                  verbatimTextOutput("ecosite_statephase_msg"),
                  verbatimTextOutput("ecosite_data"),
@@ -255,35 +256,36 @@ ui <- fluidPage(
                  leafletOutput("map_data", height = 700)
         ),
         tabPanel("Site",
+                 verbatimTextOutput("site_msg"),
                  downloadButton("download_site_data", "Download Site Data (.csv)"),
                  # verbatimTextOutput("map_msg"),
                  DT::dataTableOutput("site_data")
         ),
 
         tabPanel("Veg Plot",
-                 downloadButton("download_vegplot_data", "Download Veg Plot Data (.csv)"),
                  verbatimTextOutput("vp_msg"),
+                 downloadButton("download_vegplot_data", "Download Veg Plot Data (.csv)"),
                  DT::dataTableOutput("vp_data")
                  # verbatimTextOutput("map_msg"),
                  # DT::dataTableOutput("tabular_disp")
         ),
         tabPanel("Plot Plant Inv.",
-                 downloadButton("download_ppi_data", "Download Plot Plant Inv. Data (.csv)"),
                  verbatimTextOutput("ppi_msg"),
+                 downloadButton("download_ppi_data", "Download Plot Plant Inv. Data (.csv)"),
                  DT::dataTableOutput("ppi_data")
                  # verbatimTextOutput("map_msg"),
                  # DT::dataTableOutput("tabular_disp")
         ),
         tabPanel("Veg Transect",
+                 verbatimTextOutput("vegtrans_msg"),
                  downloadButton("download_vegtrans_data", "Download Veg Transect Data (.csv)"),
-                 verbatimTextOutput("veg_trans_msg"),
                  DT::dataTableOutput("veg_trans_data")
                  # verbatimTextOutput("map_msg"),
                  # DT::dataTableOutput("tabular_disp")
         ),
         tabPanel("Veg Transect Summary",
+                 verbatimTextOutput("vegtranssum_msg"),
                  downloadButton("download_vegtranssum_data", "Download Veg Transect Summary Data (.csv)"),
-                 verbatimTextOutput("veg_trans_sum_msg"),
                  DT::dataTableOutput("veg_trans_sum_data")
                  # verbatimTextOutput("map_msg"),
                  # DT::dataTableOutput("tabular_disp")
@@ -890,9 +892,55 @@ server <- function(input, output, session) {
         veg_trans_sum_data <- dplyr::filter(veg_trans_sum_data, usiteid %in% phaseid_usiteid)
     }
 
-    ### Date
+
+    ### Date --------------------------------------------------------------------
+
+
+    if(is.null(site_data) || NROW(site_data) == 0L){
+      site_msg <- "No site data associated with the supplied criteria."} else {
+      # assess data range
+      ## Extract the most recent date per string
+      site_data$most_recent_date <- lapply(site_data$obsdate, function(x) {
+
+        ## Split on commas
+        parts <- strsplit(x, ",\\s*")[[1]]
+
+        ## Convert to Date (extract just the date part)
+        dates <- as.Date(sub(" .*", "", parts), format = "%m/%d/%Y")
+
+        ## Return the most recent
+        max(dates, na.rm = TRUE)
+
+      }) |> unlist()
+
+      date_usiteid <- site_data |>
+        dplyr::filter(most_recent_date >= input$daterange[1],
+                      most_recent_date <= input$daterange[2]) |>
+        dplyr::pull(usiteid)
+
+      if (!is.null(site_data)          && NROW(site_data) > 0L)
+        site_data <- dplyr::filter(site_data, usiteid %in% date_usiteid)
+
+      if (!is.null(ppi_data)           && NROW(ppi_data) > 0L)
+        ppi_data <- dplyr::filter(ppi_data, usiteid %in% date_usiteid)
+
+      if (!is.null(vp_data)            && NROW(vp_data) > 0L)
+        vp_data <- dplyr::filter(vp_data, usiteid %in% date_usiteid)
+
+      if (!is.null(veg_trans_data)     && NROW(veg_trans_data) > 0L)
+        veg_trans_data <- dplyr::filter(veg_trans_data, usiteid %in% date_usiteid)
+
+      if (!is.null(veg_trans_sum_data) && NROW(veg_trans_sum_data) > 0L)
+        veg_trans_sum_data <- dplyr::filter(veg_trans_sum_data, usiteid %in% date_usiteid)
+
+    }
 
     ## Ecosite -------------------------------------------------------
+    ecosite_msg <- NULL
+
+    if(is.null(ecosite_data$statephase_data) || NROW(ecosite_data$statephase_data) == 0L){
+      ecosite_msg <- "No ecosite data associated with the supplied criteria."
+    } else {
 
     ### Components --------------------------------------------------------------
 
@@ -955,13 +1003,17 @@ server <- function(input, output, session) {
               paste(stm_not_site, collapse = ", "))
     }
 
+    }
+
 
     ## Site --------------------------------------------------------------------
 
     ### Missing fields ----------------------------------------------------------
+    site_msg <- NULL
 
     if(is.null(site_data) || NROW(site_data) == 0L){
       site_disp <- NULL
+      site_msg <- "No site data associated with the supplied criteria."
     } else {
 
     # acquire required cols from user input
@@ -1061,237 +1113,237 @@ server <- function(input, output, session) {
       DT::formatStyle(
         columns = "usiteid",
         valueColumns = "usiteid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "vegplotsize",
         valueColumns = "vegplotsize_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "elev",
         valueColumns = "elev_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "hillslopeprof",
         valueColumns = "hillslopeprof_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "geomslopeseg",
         valueColumns = "geomslopeseg_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "slope",
         valueColumns = "slope_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "aspect",
         valueColumns = "aspect_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "shapeacross",
         valueColumns = "shapeacross_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "shapedown",
         valueColumns = "shapedown_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "geomposhill",
         valueColumns = "geomposhill_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "geomposmntn",
         valueColumns = "geomposmntn_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "geompostrce",
         valueColumns = "geompostrce_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "geomposflats",
         valueColumns = "geomposflats_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "drainagecl",
         valueColumns = "drainagecl_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "flodfreqcl",
         valueColumns = "flodfreqcl_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "pondfreqcl",
         valueColumns = "pondfreqcl_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "geomfname",
         valueColumns = "geomfname_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "geomfnamep",
         valueColumns = "geomfnamep_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "ecositeid",
         valueColumns = "ecositeid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "ecositenm",
         valueColumns = "ecositenm_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "obsdate",
         valueColumns = "obsdate_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "obsdatekind",
         valueColumns = "obsdatekind_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "earthcovkind1",
         valueColumns = "earthcovkind1_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "earthcovkind2",
         valueColumns = "earthcovkind2_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "p.uprojectid",
         valueColumns = "p.uprojectid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "aspect",
         valueColumns = "aspect_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "p.projectname",
         valueColumns = "p.projectname_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "ecostateid",
         valueColumns = "ecostateid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "ecostatename",
         valueColumns = "ecostatename_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "commphaseid",
         valueColumns = "commphaseid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "aspect",
         valueColumns = "aspect_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "commphasename",
         valueColumns = "commphasename_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "pedodermclass",
         valueColumns = "pedodermclass_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "biolcrusttypedom",
         valueColumns = "biolcrusttypedom_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "biolcrusttypesecond",
         valueColumns = "biolcrusttypesecond_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "crustdevcl",
         valueColumns = "crustdevcl_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "localdisturbancedistance",
         valueColumns = "localdisturbancedistance_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "localdisturbancedescription",
         valueColumns = "localdisturbancedescription_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "soilmoistdept",
         valueColumns = "soilmoistdept_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "soilmoistdepb",
         valueColumns = "soilmoistdepb_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "obssoilmoiststat",
         valueColumns = "obssoilmoiststat_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "upedonid",
         valueColumns = "upedonid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "ptaxhistclassdate",
         valueColumns = "ptaxhistclassdate_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "ptaxhisttaxonname",
         valueColumns = "ptaxhisttaxonname_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "pedontextrecdate",
         valueColumns = "pedontextrecdate_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "pedontextrecauthor",
         valueColumns = "pedontextrecauthor_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "pedontextentry",
         valueColumns = "pedontextentry_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       )
 
     site_fig <- ggplot(ls_df_site, aes(x = `% Complete`)) +
@@ -1309,21 +1361,37 @@ server <- function(input, output, session) {
 
 
 
+    # defaults
+    missing_data <- NULL
+    missing_message <- NULL
 
+    # robust guard
+    req_cols <- c("longstddecimaldegrees", "latstddecimaldegrees", "usiteid")
+    if (!is.null(site_data) &&
+        NROW(site_data) > 0L ) {
 
-    # check for missing coordinates
-    missing_data <- site_data |> dplyr::filter(is.na(longstddecimaldegrees) | is.na(latstddecimaldegrees))
+      missing_data <- site_data |>
+        dplyr::filter(is.na(.data$longstddecimaldegrees) | is.na(.data$latstddecimaldegrees))
 
-    missing_message <- if (nrow(missing_data) > 0) {
-      paste("The following sites are missing WGS84 coordinates and were removed:",
-            paste(missing_data$usiteid, collapse = ", "))
-    } else {
-      NULL
+      if (NROW(missing_data) > 0L) {
+        missing_message <- paste(
+          "The following sites are missing WGS84 coordinates and were removed:",
+          paste(missing_data$usiteid, collapse = ", ")
+        )
+      }
     }
 
 
 
     ### Map -----------------------------------------------------------------
+
+    map_msg <- NULL
+
+    if(is.null(geom_data) || NROW(geom_data) == 0L){
+      my_map <- NULL
+      map_msg <- "No mapunit geometry returned. Is the ecological site in SSURGO?"
+    } else {
+
 
     pal <- colorFactor(
       palette = c("#d95f02", "#1b9e77"),
@@ -1339,13 +1407,13 @@ server <- function(input, output, session) {
       addProviderTiles("Esri.WorldImagery", group = "Esri Satellite")  |>
       addProviderTiles("Esri.WorldTopoMap", group = "Esri Topo")  |>
       addPolygons(data = geom_data,
-                  fillColor = "#7570b3",
-                  color = "#7570b3",
+                  fillColor = "#882E72",
+                  color = "#882E72",
                   opacity = 0.4,
                   group = "Polygons") |>
 
       addCircleMarkers(radius = 5,
-                       #color = ~pal(is_complete),
+                       color = "#E69F00",
                        group = "Points",
                        popup = ~sprintf("<b>Site:</b> %s<br><b>Ecosite:</b> %s
                                         <br><b>Ecostate:</b> %s
@@ -1355,13 +1423,16 @@ server <- function(input, output, session) {
         overlayGroups = c("Polygons", "Points"),
         options = layersControlOptions(collapsed = FALSE)
       )
+    }
 
     ### Veg plot ----------------------------------------------------------------
 
     #### Missing fields ----------------------------------------------------------
+    vp_msg <- NULL
 
     if(is.null(vp_data) || NROW(vp_data) == 0L){
       vp_disp <- NULL
+      vp_msg <- "No veg plot data associated with the supplied criteria."
     } else {
 
     # acquire required cols from user input
@@ -1447,67 +1518,67 @@ server <- function(input, output, session) {
       DT::formatStyle(
         columns = "vegplotid",
         valueColumns = "vegplotid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "obsintensity",
         valueColumns = "obsintensity_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "vegdataorigin",
         valueColumns = "vegdataorigin_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "silprofileindicator",
         valueColumns = "silprofileindicator_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "assocuserpedonid",
         valueColumns = "assocuserpedonid_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "qcreviewperson",
         valueColumns = "qcreviewperson_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "qcreviewdate",
         valueColumns = "qcreviewdate_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "qareviewperson",
         valueColumns = "qareviewperson_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "qareviewdate",
         valueColumns = "qareviewdate_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "vt.textentry",
         valueColumns = "vt.textentry_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "vt.recdate",
         valueColumns = "vt.recdate_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "psp.plotsampprotocolname",
         valueColumns = "psp.plotsampprotocolname_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "tsp.transsampprotocolname",
         valueColumns = "tsp.transsampprotocolname_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       )
 
     vegplot_fig <- ggplot(ls_df_vegplot, aes(x = `% Complete`)) +
@@ -1526,9 +1597,11 @@ server <- function(input, output, session) {
     ### Plot Plant Inventory ----------------------------------------------------
 
     #### Missing fields ----------------------------------------------------------
+    ppi_msg <- NULL
 
     if(is.null(ppi_data) || NROW(ppi_data) == 0L){
       ppi_disp <- NULL
+      ppi_msg <- "No plot plant inventory data associated with the supplied criteria."
     } else {
 
     # acquire required cols from user input
@@ -1636,57 +1709,57 @@ server <- function(input, output, session) {
       DT::formatStyle(
         columns = "plantsym",
         valueColumns = "plantsym_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "speciescancovclass",
         valueColumns = "speciescancovclass_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "speciescancovpct",
         valueColumns = "speciescancovpct_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "speciestraceamtflag",
         valueColumns = "speciestraceamtflag_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "akstratumcoverclasspct",
         valueColumns = "akstratumcoverclasspct_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "livecanopyhttop",
         valueColumns = "livecanopyhttop_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "livecanopyhtbottom",
         valueColumns = "livecanopyhtbottom_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "planttypegroup",
         valueColumns = "planttypegroup_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "vegetationstratalevel",
         valueColumns = "vegetationstratalevel_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "akstratumcoverclass",
         valueColumns = "akstratumcoverclass_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
         columns = "estannualprod",
         valueColumns = "estannualprod_bad",
-        backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       )
 
     ppi_fig <- ggplot(ls_df_ppi, aes(x = `% Complete`)) +
@@ -1706,9 +1779,11 @@ server <- function(input, output, session) {
     ### Veg Trans ---------------------------------------------------------------
 
     #### Missing fields ----------------------------------------------------------
+    vegtrans_msg <- NULL
 
      if(is.null(veg_trans_data) || NROW(veg_trans_data) == 0L){
       vegtrans_disp <- NULL
+      vegtrans_msg <- "No veg transect data associated with the supplied criteria."
     } else {
       # acquire required cols from user input
       req_site_cols <- input$vegtrans_choices
@@ -1793,27 +1868,27 @@ server <- function(input, output, session) {
         DT::formatStyle(
           columns = "vegtransectid",
           valueColumns = "vegtransectid_bad",
-          backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+          backgroundColor = DT::styleEqual(TRUE, "blueviolet")
         ) |>
         DT::formatStyle(
           columns = "transectazimuth",
           valueColumns = "transectazimuth_bad",
-          backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+          backgroundColor = DT::styleEqual(TRUE, "blueviolet")
         ) |>
         DT::formatStyle(
           columns = "transectlength",
           valueColumns = "transectlength_bad",
-          backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+          backgroundColor = DT::styleEqual(TRUE, "blueviolet")
         ) |>
         DT::formatStyle(
           columns = "lpiobsinterval",
           valueColumns = "lpiobsinterval_bad",
-          backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+          backgroundColor = DT::styleEqual(TRUE, "blueviolet")
         ) |>
         DT::formatStyle(
           columns = "totalpointssampledcount",
           valueColumns = "totalpointssampledcount_bad",
-          backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+          backgroundColor = DT::styleEqual(TRUE, "blueviolet")
         )
 
       vegtrans_fig <- ggplot(ls_df_vegtrans, aes(x = `% Complete`)) +
@@ -1834,9 +1909,11 @@ server <- function(input, output, session) {
     ### Veg Trans Sum -----------------------------------------------------------
 
     #### Missing fields ----------------------------------------------------------
+    vegtranssum_msg <- NULL
 
     if(is.null(veg_trans_sum_data) || NROW(veg_trans_sum_data) == 0L){
       vegtranssum_disp <- NULL
+      vegtranssum_msg <- "No veg transect summary data associated with the supplied criteria."
     } else {
         # acquire required cols from user input
         req_site_cols <- input$vegtranssum_choices
@@ -1923,27 +2000,27 @@ server <- function(input, output, session) {
           DT::formatStyle(
             columns = "speciesfoliarcovhitcount",
             valueColumns = "speciesfoliarcovhitcount_bad",
-            backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+            backgroundColor = DT::styleEqual(TRUE, "blueviolet")
           ) |>
           DT::formatStyle(
             columns = "speciesfoliarcovpctlineint",
             valueColumns = "speciesfoliarcovpctlineint_bad",
-            backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+            backgroundColor = DT::styleEqual(TRUE, "blueviolet")
           ) |>
           DT::formatStyle(
             columns = "speciesbasalcovhitcount",
             valueColumns = "speciesbasalcovhitcount_bad",
-            backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+            backgroundColor = DT::styleEqual(TRUE, "blueviolet")
           ) |>
           DT::formatStyle(
             columns = "speciesbasalcovpctlineint",
             valueColumns = "speciesbasalcovpctlineint_bad",
-            backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+            backgroundColor = DT::styleEqual(TRUE, "blueviolet")
           ) |>
           DT::formatStyle(
             columns = "plantsym",
             valueColumns = "plantsym_bad",
-            backgroundColor = DT::styleEqual(TRUE, "mistyrose")
+            backgroundColor = DT::styleEqual(TRUE, "blueviolet")
           )
 
         vegtranssum_fig <- ggplot(ls_df_vegtranssum, aes(x = `% Complete`)) +
@@ -1965,7 +2042,7 @@ server <- function(input, output, session) {
       }
 
 
-    ## Output Table ------------------------------------------------------------
+    ### Output Table ------------------------------------------------------------
 
     # helper: returns c(total_unique_usiteid, passing_usiteid_where_all_rows_pass)
     count_tot_and_allpass <- function(df) {
@@ -2007,11 +2084,12 @@ server <- function(input, output, session) {
 
 
 
-    ## Return Output -----------------------------------------------------------
-
-
+    ### Return Output -----------------------------------------------------------
 
     return_list[["map_data"]] <- my_map
+
+    return_list[["map_msg"]] <- map_msg
+
     return_list[["missing_coords_msg"]] <- missing_message
 
     return_list[["ppi_data"]] <- ppi_disp
@@ -2044,10 +2122,21 @@ server <- function(input, output, session) {
 
     return_list[["summary_table"]] <- sum_table
 
+    return_list[["ecosite_msg"]] <- ecosite_msg
+
+    return_list[["site_msg"]] <- site_msg
+
+    return_list[["vp_msg"]] <- vp_msg
+
+    return_list[["ppi_msg"]] <- ppi_msg
+
+    return_list[["vegtrans_msg"]] <- vegtrans_msg
+
+    return_list[["vegtranssum_msg"]] <- vegtranssum_msg
+
     return(return_list)
 
   })
-
 
   # output ------------------------------------------------------------------
 
@@ -2066,6 +2155,11 @@ server <- function(input, output, session) {
   })
 
   ## Map ---------------------------------------------------------------------
+
+  output$map_msg <- renderText({
+    req(filter_out())
+    filter_out()$map_msg
+  })
 
   output$missing_coords_msg <- renderText({
     req(filter_out())
@@ -2105,6 +2199,11 @@ server <- function(input, output, session) {
     filter_out()$ecosite_return$comp_req
   })
 
+  output$ecosite_msg <- renderText({
+    req(fetch_out())
+    fetch_out()$ecosite_msg
+  })
+
   output$summary_table <- renderTable({
     req(filter_out())
     filter_out()$summary_table
@@ -2130,7 +2229,14 @@ server <- function(input, output, session) {
     filter_out()$vegtranssum_fig
   })
 
+
+
   ## Site --------------------------------------------------------------------
+
+  output$site_msg <- renderText({
+    req(filter_out())
+    filter_out()$site_msg
+  })
 
   output$site_data <- DT::renderDataTable({
     req(filter_out())
@@ -2170,6 +2276,11 @@ server <- function(input, output, session) {
 
   ## PPI ---------------------------------------------------------------------
 
+  output$ppi_msg <- renderText({
+    req(filter_out())
+    filter_out()$ppi_msg
+  })
+
   output$ppi_data <- DT::renderDataTable({
     req(filter_out())
     filter_out()$ppi_data
@@ -2190,10 +2301,9 @@ server <- function(input, output, session) {
   )
 
   # Veg Trans ---------------------------------------------------------------
-
-  output$veg_trans_msg <- renderText({
+  output$vegtrans_msg <- renderText({
     req(filter_out())
-    filter_out()$veg_trans_msg
+    filter_out()$vegtrans_msg
   })
 
   output$veg_trans_data <- DT::renderDataTable({
@@ -2212,10 +2322,15 @@ server <- function(input, output, session) {
 
 # Veg Trans Sum -----------------------------------------------------------
 
-  output$veg_trans_sum_msg <- renderText({
+  output$vegtranssum_msg <- renderText({
     req(filter_out())
-    filter_out()$veg_trans_sum_msg
+    filter_out()$vegtranssum_msg
   })
+
+  # output$veg_trans_sum_msg <- renderText({
+  #   req(filter_out())
+  #   filter_out()$veg_trans_sum_msg
+  # })
 
   output$veg_trans_sum_data <- DT::renderDataTable({
     req(filter_out())
