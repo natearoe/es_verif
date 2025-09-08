@@ -14,6 +14,8 @@ library(jsonlite)
 library(stringr)
 library(shiny)
 library(ggplot2)
+library(stats)
+library(tidyr)
 
 # ui ----------------------------------------------------------------------
 
@@ -27,16 +29,40 @@ ui <- fluidPage(
       helpText("2. Click 'Fetch Data' and wait for load (Section A)"),
       helpText("3. Choose required fields (Section B)"),
       helpText("4. Choose filtering criteria, if desired (Section C)"),
-      helpText("5. Click 'Filter and Map Data'"),
+      helpText("5. Click 'Filter and Display Data'"),
 
       hr(style = "border-top: 1px solid #2f2f2f; opacity: 1; margin: 8px 0;"),
 
       tags$h5("Section A:", style = "text-decoration: underline;"),
 
 
+      fluidRow(
+        column(6,
+               pickerInput(inputId = "mlra", label = "MLRA:",
+                           choices = NULL, options = list(
+                             title = "Choose MLRA",
+                             `live-search` = TRUE
+                           ))),
+        column(6,
+               pickerInput(inputId = "esid", label = "Ecological Site ID:",
+                           choices = character(0),
+                           options = list(
+                             title = "Choose Ecological Site ID...",
+                             `live-search` = TRUE
+                           )))
+      ),
 
-      textInput(inputId = "esid", label = "Ecological Site ID:"),
-      actionButton("fetch_button", "Fetch Data"),
+      actionButton("fetch_button", "Fetch Data by Selection"),
+
+      tags$h5("OR",
+              style = "text-decoration: underline; text-align: center;"
+              ),
+
+
+      textInput(inputId = "esid", label = "Ecological Site ID:",
+                placeholder = "e.g., R018XI101"
+                ),
+      actionButton("fetch_button", "Fetch Data by Ecological Site ID"),
 
       hr(style = "border-top: 1px solid #2f2f2f; opacity: 1; margin: 8px 0;"),
       tags$h5("Section B:", style = "text-decoration: underline;"),
@@ -232,27 +258,35 @@ ui <- fluidPage(
       verbatimTextOutput("missing_coords_msg"),
       tabsetPanel(
         tabPanel("Ecosite",
-                 verbatimTextOutput("ecosite_msg"),
-                 verbatimTextOutput("ecosite_comp_msg"),
-                 verbatimTextOutput("ecosite_statephase_msg"),
-                 verbatimTextOutput("ecosite_data"),
-                 verbatimTextOutput("stm_not_site"),
-                 verbatimTextOutput("site_not_stm"),
-                 tableOutput("summary_table"),
-                 fluidRow(
-                   column(6, plotOutput("site_fig", height = 250)),
-                   column(6, plotOutput("vegplot_fig", height = 250)),
-                 ),
-                 fluidRow(
-                   column(6, plotOutput("ppi_fig", height = 250)),
-                   column(6, plotOutput("vegtrans_fig", height = 250)),
-                 ),
-                 fluidRow(
-                   column(6, plotOutput("vegtranssum_fig", height = 250))
-                 )
+                   verbatimTextOutput("ecosite_msg"),
+                   verbatimTextOutput("ecosite_comp_msg"),
+                   verbatimTextOutput("ecosite_statephase_msg"),
+                   verbatimTextOutput("ecosite_data"),
+                   verbatimTextOutput("stm_not_site"),
+                   verbatimTextOutput("site_not_stm"),
+                   textOutput("summary_title", container = function(...) tags$h5(style = "text-decoration: underline; margin: 8px 0;", ...)),
+                   tableOutput("summary_table"),
+                   textOutput("statephase_title", container = function(...) tags$h5(style = "text-decoration: underline; margin: 8px 0;", ...)),
+                   DT::dataTableOutput("statephase_table"),
+                   tags$br(),
+                   fluidRow(
+                     column(6, plotOutput("site_fig", height = 250)),
+                     column(6, plotOutput("vegplot_fig", height = 250))
+                   ),
+                   tags$br(),
+                   fluidRow(
+                     column(6, plotOutput("ppi_fig", height = 250)),
+                     column(6, plotOutput("vegtrans_fig", height = 250))
+                   ),
+                   tags$br(),
+                   fluidRow(
+                     column(6, plotOutput("vegtranssum_fig", height = 250))
+                   )
+
         ),
         tabPanel("Map",
                  verbatimTextOutput("map_msg"),
+                 downloadButton("download_map", "Download Map"),
                  leafletOutput("map_data", height = 700)
         ),
         tabPanel("Site",
@@ -289,7 +323,7 @@ ui <- fluidPage(
                  DT::dataTableOutput("veg_trans_sum_data")
                  # verbatimTextOutput("map_msg"),
                  # DT::dataTableOutput("tabular_disp")
-        ),
+        )
       )
     )
   )
@@ -298,6 +332,57 @@ ui <- fluidPage(
 
 # server ------------------------------------------------------------------
 server <- function(input, output, session) {
+
+  # pull MLRAs from EDIT
+  mlra_choices <- read.table("https://edit.jornada.nmsu.edu/services/downloads/esd/geo-unit-list.txt",
+                      sep="\t", quote = "\"", header=TRUE, skip=2) |>
+    dplyr::mutate(mlra_name = paste(MLRA, MLRA.name, sep = " - ")) |> dplyr::pull(mlra_name)
+
+  # update MLRA choice list with line above
+  observe({
+    updatePickerInput(
+      session, "mlra",
+      choices  = unique(mlra_choices),
+      selected = NULL
+    )
+  })
+
+  # update ESID choice list based on MLRA selection
+  esid_df <- reactive({
+    req(input$mlra)
+    soilDB::get_EDIT_ecoclass_by_geoUnit(geoUnit = substr(input$mlra, 1, 4), catalog = "esd") |>
+      dplyr::select(id, name)
+  })
+
+  observeEvent(input$mlra, {
+    req(input$mlra)
+    choices <- stats::setNames(esid_df()$id, paste(esid_df()$id, esid_df()$name))
+
+    updatePickerInput(
+      session, "esid",
+      choices  = choices,
+      selected = NULL
+    )
+  })
+
+
+
+  # logic for clearing results after new fetch
+
+  # initialize
+  clear_after_fetch <- reactiveVal(TRUE)
+
+  # flip switch on fetch - preventing output
+  observeEvent(input$fetch_button, ignoreInit = TRUE, {
+    # User fetched (again) -> blank filter-driven outputs
+    clear_after_fetch(TRUE)
+  })
+
+  # flip switch on filter - allow output
+  observeEvent(input$filter_button, ignoreInit = TRUE, {
+    # User filtered -> show filter-driven outputs
+    clear_after_fetch(FALSE)
+  })
 
 
   # fetchReact --------------------------------------------------------------
@@ -338,6 +423,11 @@ server <- function(input, output, session) {
       # Ecosite data ------------------------------------------------------------
 
       incProgress(1/7, detail = "Fetching ecosite data...")
+
+      # check if esid has a space - it should not
+      if (grepl("\\s", input$esid)) {
+        stop("Invalid input: 'Ecological Site ID' cannot contain spaces.")
+      }
 
       # ecosite data includes the number of comps web report, accessing states/phases
       # from EDIT, and accessing states/phases from site data
@@ -745,10 +835,10 @@ server <- function(input, output, session) {
                           "Vegetation Plot Text" = "vt.textentry",
                           "Vegetation Plot Text Date" = "vt.recdate",
                           "Plot Sampling Protocol Name" = "psp.plotsampprotocolname",
-                          "Total Overstory Canopy Cover Percent" = "overstorycancontotalpct",
-                          "Total Overstory Canopy Cover Class" = "overstorycancovtotalclass",
-                          "Total Canopy Cover Percent" = "cancovtotalpct",
-                          "Total Canopy Cover Class" = "cancovtotalclass",
+                          "Total Overstory Canopy" = c("Total Overstory Canopy Cover Percent" = "overstorycancontotalpct",
+                                                       "Total Overstory Canopy Cover Class" = "overstorycancovtotalclass"),
+                          "Total Canopy Cover" = c("Total Canopy Cover Percent" = "cancovtotalpct",
+                                                   "Total Canopy Cover Class" = "cancovtotalclass"),
                           "Basal Area Plot Total" = "basalareaplottotal",
                           "Basal Area Assessment Method" = "basalareaassessmethod",
                           "Plot Sampling Protocol" = "psp.plotsampprotocolname",
@@ -788,6 +878,8 @@ server <- function(input, output, session) {
     names(field_mapping_flat) <- sub("Geom Comp\\.", "", names(field_mapping_flat))
     names(field_mapping_flat) <- sub("Abundance\\.", "", names(field_mapping_flat))
     names(field_mapping_flat) <- sub("Strata\\.", "", names(field_mapping_flat))
+    names(field_mapping_flat) <- sub("Total Overstory Canopy\\.", "", names(field_mapping_flat))
+    names(field_mapping_flat) <- sub("Total Canopy Cover\\.", "", names(field_mapping_flat))
 
     # build a parent map
     parent_map <- setNames(
@@ -937,26 +1029,41 @@ server <- function(input, output, session) {
 
     ## Ecosite -------------------------------------------------------
     ecosite_msg <- NULL
+    statephase_tbl <- NULL
+    site_msg <- NULL
 
-    if(is.null(ecosite_data$statephase_data) || NROW(ecosite_data$statephase_data) == 0L){
-      ecosite_msg <- "No ecosite data associated with the supplied criteria."
-    } else {
-
-    ### Components --------------------------------------------------------------
-
-    # determine number of sites correlated to ecositeid
-    n_sites <- length(unique(site_data$usiteid))
-    # determine minimum number of sites based on number of comps
-    comp_req <- ifelse(ecosite_data$comp < 4, ecosite_data$comp * 5, 20)
-
-    # create message stating whether there are a sufficient number of sites based on comps
-    if(n_sites >= comp_req){
-      return_list[["ecosite_return"]][["comp_req"]] <- paste0("✅ " , n_sites, " sites with vegetation plots are correlated to ", input$esid, ".",
-                                                              " A minimum of ", comp_req, " are required.")
-    } else {
-      return_list[["ecosite_return"]][["comp_req"]] <- paste0("⚠️ ", comp_req, " sites with vegetation plots are required to be correlated to ", input$esid,
-                                                              " but only ", n_sites, " exist.")
+    # assign site_msg
+    if(is.null(site_data) || NROW(site_data) == 0L){
+      site_msg <- "No site data associated with the supplied criteria."
+      ecosite_msg <- "No site data associated with the supplied criteria."
     }
+
+    if(is.null(site_msg)){
+
+
+      ### States/Phases Missing ---------------------------------------------------
+
+      if(is.null(ecosite_data$statephase_data) || NROW(ecosite_data$statephase_data) == 0L){
+        ecosite_msg <- "No ecosite data associated with the supplied criteria."
+      } else {
+
+
+        ### Numb. Sites/Comps -------------------------------------------------------
+
+        # determine number of sites correlated to ecositeid
+        n_sites <- length(unique(site_data$usiteid))
+        # determine minimum number of sites based on number of comps
+        comp_req <- ifelse(ecosite_data$comp < 4, ecosite_data$comp * 5, 20)
+
+        # create message stating whether there are a sufficient number of sites based on comps
+        if(n_sites >= comp_req){
+          return_list[["ecosite_return"]][["comp_req"]] <- paste0("✅ " , n_sites, " sites with vegetation plots are correlated to ", input$esid, ".",
+                                                                  " A minimum of ", comp_req, " are required.")
+        } else {
+
+          return_list[["ecosite_return"]][["comp_req"]] <- paste0("⚠️ ", comp_req, " sites with vegetation plots are required to be correlated to ", input$esid,
+                                                                  " but only ", n_sites, " exist.")
+        }
 
 
     ### States & Phases ---------------------------------------------------------
@@ -1003,23 +1110,106 @@ server <- function(input, output, session) {
               paste(stm_not_site, collapse = ", "))
     }
 
+    #### Plotting ----------------------------------------------------------------
+
+    # EDIT documented states/phases
+    edit_statephases <- ecosite_data$statephase_data %>%
+      select(state, community)
+
+
+    # All states/phases documented in Site data
+    site_statephases <- site_data |> select(ecostateid, commphaseid)
+    # Change no text to "None"
+    site_statephases$ecostateid[is.na(site_statephases$ecostateid)] <- "None"
+    site_statephases$commphaseid[is.na(site_statephases$commphaseid)] <- "None"
+
+    # count number of observations of state/phase combinations
+    counts <- site_statephases |> count(ecostateid, commphaseid, name = "n")
+
+
+    # ---- Build full grid across all EDIT states & phases ----
+    states <- sort(unique(c(edit_statephases$state, "None")))
+    phases <- sort(unique(c(edit_statephases$community, "None")))
+
+    grid <- tidyr::crossing(state = states, community = phases)
+
+    # Mark allowed pairs from EDIT
+    allowed_pairs <- edit_statephases %>%
+      distinct(state, community) %>%
+      mutate(allowed = TRUE)
+
+    full <- grid %>%
+      left_join(allowed_pairs, by = c("state","community")) %>%
+      mutate(allowed = tidyr::replace_na(allowed, FALSE)) %>%
+      left_join(counts, by = c("state" = "ecostateid", "community" = "commphaseid")) %>%
+      mutate(
+        n = tidyr::replace_na(n, 0L)    # NA for disallowed (to style grey)
+      )
+
+    # Pretty labels (keep "None" unprefixed)
+    pretty_state  <- function(x) ifelse(x == "None", "None", paste("State", x))
+    pretty_phase  <- function(x) ifelse(x == "None", "None", paste("Phase", x))
+
+    # Wide counts table
+    wide_counts <- full %>%
+      transmute(State = pretty_state(state),
+                Phase = pretty_phase(community),
+                n) %>%
+      tidyr::pivot_wider(names_from = Phase, values_from = n)
+
+    # Parallel wide mask for styling (TRUE allowed / FALSE disallowed)
+    wide_mask <- full %>%
+      transmute(State = pretty_state(state),
+                Phase = pretty_phase(community),
+                allowed) %>%
+      tidyr::pivot_wider(names_from = Phase, values_from = allowed, names_prefix = "mask__")
+
+    # Merge counts + hidden mask columns for DT
+    statephase_tbl <- dplyr::left_join(wide_counts, wide_mask, by = "State")
+
+    phase_cols <- setdiff(names(statephase_tbl), c("State", grep("^mask__", names(statephase_tbl), value = TRUE)))
+    mask_cols  <- paste0("mask__", phase_cols)
+
+    # Hide mask columns (DataTables uses 0-based indices)
+    mask_idx <- match(mask_cols, names(statephase_tbl)) - 1
+
+    dt <- DT::datatable(
+      statephase_tbl, rownames = FALSE,
+      options = list(
+        dom = "t", pageLength = 50, scrollX = TRUE, fixedHeader = TRUE,
+        columnDefs = list(list(visible = FALSE, targets = mask_idx))
+      )
+    )
+
+    # Grey out disallowed cells (mask == FALSE), leave allowed as default
+    for (i in seq_along(phase_cols)) {
+      dt <- DT::formatStyle(
+        dt,
+        columns      = phase_cols[i],
+        valueColumns = mask_cols[i],
+        backgroundColor = DT::styleEqual(c(TRUE, FALSE), c(NA, "darkgrey")),
+        color           = DT::styleEqual(c(TRUE, FALSE), c("black", "black"))
+      )
     }
+
+    # Optional: center numbers
+    statephase_tbl <- DT::formatStyle(dt, columns = phase_cols)
+
+    }
+    }
+
+
 
 
     ## Site --------------------------------------------------------------------
 
     ### Missing fields ----------------------------------------------------------
-    site_msg <- NULL
+    site_disp <- NULL
 
-    if(is.null(site_data) || NROW(site_data) == 0L){
-      site_disp <- NULL
-      site_msg <- "No site data associated with the supplied criteria."
-    } else {
+    if(is.null(site_msg)){
 
     # acquire required cols from user input
     req_site_cols <- input$site_choices
-
-
 
     required_columns <- field_mapping_flat[req_site_cols]
 
@@ -1070,13 +1260,14 @@ server <- function(input, output, session) {
                                              "geompostrce_bad", "geomposflats_bad")],
                                   na.rm = TRUE) > 0
 
-    ls_df_nogeom <- ls_df |> dplyr::select(c(paste0(field_mapping_flat[req_site_cols], "_bad"), "geomcomp_bad")) |>
-      dplyr::select(-c(
-        "geomposhill_bad",
-        "geomposmntn_bad",
-        "geompostrce_bad",
-        "geomposflats_bad"
-      ))
+    ls_df_nogeom <- ls_df |> dplyr::select(c(paste0(field_mapping_flat[req_site_cols], "_bad"), "geomcomp_bad"))
+
+    if(length(field_mapping[["Geom Comp"]][req_site_cols[req_site_cols %in% names(field_mapping[["Geom Comp"]])]]) > 0){
+      ls_df_nogeom <- ls_df_nogeom |>
+        dplyr::select(-paste(field_mapping[["Geom Comp"]][req_site_cols[req_site_cols %in% names(field_mapping[["Geom Comp"]])]], "bad", sep = "_"))
+    }
+
+
 
     ls_df$`% Complete` <- (ncol(ls_df_nogeom)-rowSums(ls_df_nogeom))/(ncol(ls_df_nogeom))*100
 
@@ -1090,8 +1281,6 @@ server <- function(input, output, session) {
 
 
     ### Plotting ----------------------------------------------------------------
-
-
 
     # Create DT table
     site_disp <- DT::datatable(ls_df_site,
@@ -1398,31 +1587,56 @@ server <- function(input, output, session) {
       domain = c(FALSE, TRUE)
     )
 
-    my_map  <- site_data |> dplyr::filter(!is.na(longstddecimaldegrees) & !is.na(latstddecimaldegrees)) |>
-      sf::st_as_sf(coords = c("longstddecimaldegrees",
-                              "latstddecimaldegrees"),
-                   crs = st_crs(4326)) |>
-      leaflet::leaflet() |>
+    my_map  <- leaflet::leaflet() |>
       addProviderTiles("OpenStreetMap", group = "OpenStreetMap")  |>
       addProviderTiles("Esri.WorldImagery", group = "Esri Satellite")  |>
-      addProviderTiles("Esri.WorldTopoMap", group = "Esri Topo")  |>
-      addPolygons(data = geom_data,
-                  fillColor = "#882E72",
-                  color = "#882E72",
-                  opacity = 0.4,
-                  group = "Polygons") |>
-
-      addCircleMarkers(radius = 5,
-                       color = "#E69F00",
-                       group = "Points",
-                       popup = ~sprintf("<b>Site:</b> %s<br><b>Ecosite:</b> %s
-                                        <br><b>Ecostate:</b> %s
-                                        <br><b>Commphase:</b> %s", usiteid, ecositeid, ecostateid, commphaseid)) |>
+      addProviderTiles("Esri.WorldTopoMap", group = "Esri Topo") |>
       addLayersControl(
         baseGroups = c("OpenStreetMap", "Esri Satellite", "Esri Topo"),
         overlayGroups = c("Polygons", "Points"),
         options = layersControlOptions(collapsed = FALSE)
+      ) |>
+      addPolygons(
+      data = geom_data,
+      fillColor = "#882E72",
+      color = "#882E72",
+      opacity = 0.4,
+      group = "Polygons"
+    ) |>
+      addScaleBar(
+        position = "bottomleft",
+        options = scaleBarOptions(
+          maxWidth = 100,
+          metric = TRUE,
+          imperial = TRUE,
+          updateWhenIdle = FALSE
+        )
       )
+
+    if(is.null(site_msg)){
+
+      pts <- site_data |>
+        dplyr::filter(!is.na(longstddecimaldegrees), !is.na(latstddecimaldegrees)) |>
+        sf::st_as_sf(
+          coords = c("longstddecimaldegrees", "latstddecimaldegrees"),
+          crs = 4326
+        )
+
+      my_map <- my_map |> addCircleMarkers(data = pts,
+                                           radius = 5,
+                                           color = "#E69F00",
+                                           group = "Points",
+                                           popup = ~sprintf("<b>Site:</b> %s<br><b>Ecosite:</b> %s
+                                        <br><b>Ecostate:</b> %s
+                                        <br><b>Commphase:</b> %s", usiteid, ecositeid, ecostateid, commphaseid),
+                                           clusterOptions = markerClusterOptions(
+                                             showCoverageOnHover = TRUE,
+                                             zoomToBoundsOnClick = TRUE,
+                                             spiderfyOnMaxZoom = TRUE,         # separate points at max zoom
+                                             disableClusteringAtZoom = 15
+                                           ))
+
+    }
     }
 
     ### Veg plot ----------------------------------------------------------------
@@ -1483,7 +1697,23 @@ server <- function(input, output, session) {
     ls_df <- make_bad_flags(df = site_data, field_mapping = field_mapping,
                             required_fields = req_site_cols) |> as.data.frame()
 
-    ls_df_nogeom <- ls_df |> dplyr::select(paste0(field_mapping_flat[req_site_cols], "_bad"))
+    ls_df$totover_bad <- rowSums(ls_df[, c("overstorycancontotalpct_bad", "overstorycancovtotalclass_bad")],
+                                  na.rm = TRUE) > 0
+
+    ls_df$totcanopy_bad <- rowSums(ls_df[, c("cancovtotalpct_bad", "cancovtotalclass_bad")],
+                                 na.rm = TRUE) > 0
+
+    ls_df_nogeom <- ls_df |> dplyr::select(paste0(field_mapping_flat[req_site_cols], "_bad"), "totover_bad", "totcanopy_bad")
+
+    if(length(field_mapping[["Total Overstory Canopy"]][req_site_cols[req_site_cols %in% names(field_mapping[["Total Overstory Canopy"]])]]) > 0){
+      ls_df_nogeom <- ls_df_nogeom |>
+        dplyr::select(-paste(field_mapping[["Total Overstory Canopy"]][req_site_cols[req_site_cols %in% names(field_mapping[["Total Overstory Canopy"]])]], "bad", sep = "_"))
+    }
+
+    if(length(field_mapping[["Total Canopy Cover"]][req_site_cols[req_site_cols %in% names(field_mapping[["Total Canopy Cover"]])]]) > 0){
+      ls_df_nogeom <- ls_df_nogeom |>
+        dplyr::select(-paste(field_mapping[["Total Canopy Cover"]][req_site_cols[req_site_cols %in% names(field_mapping[["Total Canopy Cover"]])]], "bad", sep = "_"))
+    }
 
     ls_df$`% Complete` <- (ncol(ls_df_nogeom)-rowSums(ls_df_nogeom))/(ncol(ls_df_nogeom))*100
 
@@ -1558,6 +1788,36 @@ server <- function(input, output, session) {
       DT::formatStyle(
         columns = "qareviewdate",
         valueColumns = "qareviewdate_bad",
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
+      ) |>
+      DT::formatStyle(
+        columns = "overstorycancovtotalclass",
+        valueColumns = "overstorycancovtotalclass_bad",
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
+      ) |>
+      DT::formatStyle(
+        columns = "overstorycancontotalpct",
+        valueColumns = "overstorycancontotalpct_bad",
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
+      ) |>
+      DT::formatStyle(
+        columns = "cancovtotalclass",
+        valueColumns = "cancovtotalclass_bad",
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
+      ) |>
+      DT::formatStyle(
+        columns = "cancovtotalpct",
+        valueColumns = "cancovtotalpct_bad",
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
+      ) |>
+      DT::formatStyle(
+        columns = "basalareaplottotal",
+        valueColumns = "basalareaplottotal_bad",
+        backgroundColor = DT::styleEqual(TRUE, "blueviolet")
+      ) |>
+      DT::formatStyle(
+        columns = "basalareaassessmethod",
+        valueColumns = "basalareaassessmethod_bad",
         backgroundColor = DT::styleEqual(TRUE, "blueviolet")
       ) |>
       DT::formatStyle(
@@ -1652,29 +1912,26 @@ server <- function(input, output, session) {
     ls_df <- make_bad_flags(df = site_data, field_mapping = field_mapping,
                             required_fields = req_site_cols) |> as.data.frame()
 
-    abund_cols <- c("speciescancovclass", "speciescancovpct",
-                    "speciestraceamtflag", "akstratumcoverclasspct")
+    ls_df$abund_bad <- rowSums(ls_df[, c("speciescancovclass_bad", "speciescancovpct_bad",
+                                         "speciestraceamtflag_bad", "akstratumcoverclasspct_bad")],
+                                  na.rm = TRUE) > 0
 
-    abund_cols <- abund_cols[abund_cols %in% field_mapping_flat[req_site_cols]]
-
-    abund_cols <- paste(abund_cols, "bad", sep = "_")
-
-    strata_cols <- c("livecanopyhttop", "livecanopyhtbottom",
-                     "planttypegroup", "vegetationstratalevel",
-                     "akstratumcoverclass")
-
-    strata_cols <- strata_cols[strata_cols %in% field_mapping_flat[req_site_cols]]
-
-    strata_cols <- paste(strata_cols, "bad", sep = "_")
-
-    ls_df$abund_bad <- rowSums(ls_df[, abund_cols],
+    ls_df$strata_bad <- rowSums(ls_df[, c("livecanopyhttop_bad", "livecanopyhtbottom_bad",
+                                          "planttypegroup_bad", "vegetationstratalevel_bad",
+                                          "akstratumcoverclass_bad")],
                                na.rm = TRUE) > 0
 
-    ls_df$strata_bad <- rowSums(ls_df[, strata_cols],
-                                na.rm = TRUE) > 0
+    ls_df_nogeom <- ls_df |> dplyr::select(c(paste0(field_mapping_flat[req_site_cols], "_bad"), "abund_bad", "strata_bad"))
 
-    ls_df_nogeom <- ls_df |> dplyr::select(all_of(c(paste0(field_mapping_flat[req_site_cols], "_bad"), "abund_bad", "strata_bad"))) |>
-      dplyr::select(-c(abund_cols, strata_cols))
+    if(length(field_mapping[["Abundance"]][req_site_cols[req_site_cols %in% names(field_mapping[["Abundance"]])]]) > 0){
+      ls_df_nogeom <- ls_df_nogeom |>
+        dplyr::select(-paste(field_mapping[["Abundance"]][req_site_cols[req_site_cols %in% names(field_mapping[["Abundance"]])]], "bad", sep = "_"))
+    }
+
+    if(length(field_mapping[["Strata"]][req_site_cols[req_site_cols %in% names(field_mapping[["Strata"]])]]) > 0){
+      ls_df_nogeom <- ls_df_nogeom |>
+        dplyr::select(-paste(field_mapping[["Strata"]][req_site_cols[req_site_cols %in% names(field_mapping[["Strata"]])]], "bad", sep = "_"))
+    }
 
     ls_df$`% Complete` <- (ncol(ls_df_nogeom)-rowSums(ls_df_nogeom))/(ncol(ls_df_nogeom))*100
 
@@ -1843,7 +2100,7 @@ server <- function(input, output, session) {
 
       ls_df$Passing <- ifelse(ls_df$`% Complete` == 100, "\u2705", "\u274C")
 
-      ls_df_vegtrans <- ls_df |> dplyr::select(Passing, `% Complete`, `# Cols. Req.`, `# Cols. Missing`, everything())
+      ls_df_vegtrans <- ls_df |> dplyr::select(Passing, `% Complete`, `# Cols. Req.`, `# Cols. Missing`, dplyr::everything())
 
 
       ### Plotting ----------------------------------------------------------------
@@ -1860,10 +2117,11 @@ server <- function(input, output, session) {
                                        scrollY = "500px",
                                        columnDefs = list(
                                          list(visible = FALSE,
-                                              targets = 6:ncol(ls_df)-1
+                                              targets = 11:ncol(ls_df)-1
                                          )
                                        )
                                      )) |>
+
         DT::formatRound("% Complete", digits = 0) |>
         DT::formatStyle(
           columns = "vegtransectid",
@@ -1992,7 +2250,7 @@ server <- function(input, output, session) {
                                             scrollY = "500px",
                                             columnDefs = list(
                                               list(visible = FALSE,
-                                                   targets = 6:ncol(ls_df)-1
+                                                   targets = 11:ncol(ls_df)-1
                                               )
                                             )
                                           )) |>
@@ -2042,7 +2300,16 @@ server <- function(input, output, session) {
       }
 
 
-    ### Output Table ------------------------------------------------------------
+    ### Pass/Not Passing Table ------------------------------------------------------------
+
+    sum_table <- NULL
+
+    if(is.null(site_data) || NROW(site_data) == 0L){
+      site_disp <- NULL
+      site_msg <- "No site data associated with the supplied criteria."
+    } else {
+
+
 
     # helper: returns c(total_unique_usiteid, passing_usiteid_where_all_rows_pass)
     count_tot_and_allpass <- function(df) {
@@ -2071,6 +2338,9 @@ server <- function(input, output, session) {
     vt_vals    <- z_or_counts(ls_df_vegtrans,    vegtrans_disp)
     vts_vals   <- z_or_counts(ls_df_vegtranssum, vegtranssum_disp)
 
+
+
+
     sum_table <- data.frame(
       Metric = c("# of Sites", "# of Sites Passing"),
       Site = site_vals,
@@ -2080,6 +2350,8 @@ server <- function(input, output, session) {
       `Veg Trans Sum.` = vts_vals,
       check.names = FALSE
     )
+
+    }
 
 
 
@@ -2122,6 +2394,8 @@ server <- function(input, output, session) {
 
     return_list[["summary_table"]] <- sum_table
 
+    return_list[["statephase_table"]] <- statephase_tbl
+
     return_list[["ecosite_msg"]] <- ecosite_msg
 
     return_list[["site_msg"]] <- site_msg
@@ -2157,76 +2431,116 @@ server <- function(input, output, session) {
   ## Map ---------------------------------------------------------------------
 
   output$map_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$map_msg
   })
 
   output$missing_coords_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$missing_coords_msg
   })
 
   output$map_data <- renderLeaflet({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$map_data
   })
+
+    output$download_map <- downloadHandler(
+      filename = function() { paste0(input$esid, "_map.html") },
+      content = function(file) {
+        htmlwidgets::saveWidget(filter_out()$map_data, file, selfcontained = TRUE)
+      }
+    )
+
+
 
 
   ## Ecosite -----------------------------------------------------------------
 
   output$ecosite_comp_msg <- renderText({
+    req(!clear_after_fetch())
     req(fetch_out())
     fetch_out()$fetch_msg$ecosite$comp
   })
 
   output$ecosite_statephase_msg <- renderText({
+    req(!clear_after_fetch())
     req(fetch_out())
     fetch_out()$fetch_msg$ecosite$statephase
   })
 
   output$stm_not_site <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$ecosite_return$stm_not_site
   })
 
   output$site_not_stm <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$ecosite_return$site_not_stm
   })
 
   output$ecosite_data <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$ecosite_return$comp_req
   })
 
   output$ecosite_msg <- renderText({
+    req(!clear_after_fetch())
     req(fetch_out())
     fetch_out()$ecosite_msg
   })
 
   output$summary_table <- renderTable({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$summary_table
   })
 
+  output$statephase_table <- DT::renderDataTable({
+    req(!clear_after_fetch())
+    req(filter_out())
+    filter_out()$statephase_table
+  })
+
   output$site_fig <- renderPlot({
+    req(!clear_after_fetch())
     filter_out()$site_fig
   })
 
   output$vegplot_fig <- renderPlot({
+    req(!clear_after_fetch())
     filter_out()$vegplot_fig
   })
 
   output$ppi_fig <- renderPlot({
+    req(!clear_after_fetch())
     filter_out()$ppi_fig
   })
 
   output$vegtrans_fig <- renderPlot({
+    req(!clear_after_fetch())
     filter_out()$vegtrans_fig
   })
 
   output$vegtranssum_fig <- renderPlot({
+    req(!clear_after_fetch())
     filter_out()$vegtranssum_fig
+  })
+
+  output$summary_title <- renderText({
+    req(!clear_after_fetch())
+    "Summary of Sites Passing Criteria:"
+  })
+
+  output$statephase_title <- renderText({
+    req(!clear_after_fetch())
+    "State & Phase Table (grey cells do not exist in EDIT STM):"
   })
 
 
@@ -2234,11 +2548,13 @@ server <- function(input, output, session) {
   ## Site --------------------------------------------------------------------
 
   output$site_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$site_msg
   })
 
   output$site_data <- DT::renderDataTable({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$site_data
   })
@@ -2256,11 +2572,13 @@ server <- function(input, output, session) {
   ## Veg Plot ----------------------------------------------------------------
 
   output$vp_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$vp_msg
   })
 
   output$vp_data <- DT::renderDataTable({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$vp_data
   })
@@ -2277,16 +2595,19 @@ server <- function(input, output, session) {
   ## PPI ---------------------------------------------------------------------
 
   output$ppi_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$ppi_msg
   })
 
   output$ppi_data <- DT::renderDataTable({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$ppi_data
   })
 
   output$ppi_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$ppi_msg
   })
@@ -2302,11 +2623,13 @@ server <- function(input, output, session) {
 
   # Veg Trans ---------------------------------------------------------------
   output$vegtrans_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$vegtrans_msg
   })
 
   output$veg_trans_data <- DT::renderDataTable({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$veg_trans_data
   })
@@ -2323,6 +2646,7 @@ server <- function(input, output, session) {
 # Veg Trans Sum -----------------------------------------------------------
 
   output$vegtranssum_msg <- renderText({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$vegtranssum_msg
   })
@@ -2333,6 +2657,7 @@ server <- function(input, output, session) {
   # })
 
   output$veg_trans_sum_data <- DT::renderDataTable({
+    req(!clear_after_fetch())
     req(filter_out())
     filter_out()$veg_trans_sum_data
   })

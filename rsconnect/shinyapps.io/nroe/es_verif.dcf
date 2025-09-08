@@ -5,7 +5,7 @@ account: nroe
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 15002761
-bundleId: 10807050
+bundleId: 10878694
 url: https://nroe.shinyapps.io/es_verif/
 version: 1
 asMultiple: FALSE
